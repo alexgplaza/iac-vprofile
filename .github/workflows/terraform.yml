@@ -1,0 +1,57 @@
+name: "Vprofile IAC"
+on: #con esto se hace trigger del workflow
+  push: # en cuanto haya un push se hace a las siguientes branches
+    branches:
+      - main
+      - stage
+    paths: # tiene que ir con branches
+      - terraform/** #cualquier cambio en terraform o en subfolders y la accion es push (en las ramas main or stage), entonces se lanza el workflow
+  pull_request: # si alguien hace una pull request, se hará sobre la branch main.
+    branches:
+      - main #se supone que el dev hace las pruebas en otra rama y luego lanza la pull request.
+    paths:
+      - terraform/**
+
+env:
+# Credentials for deployment to AWS
+AWS_ACCESS_KEY_ID: ${{secrets.AWS_ACCESS_KEY_ID}}
+AWS_SECRET_ACCESS_KEY: ${{secrets.AWS_SECRET_ACCESS_KEY}}
+BUCKET_TF_STATE: ${{secrets.BUCKET_TF_STATE}}
+AWS_REGION: us-east-1
+EKS_CLUSTER: vprofile-eks #el mismo que hemos puesto en variables.tf
+
+jobs: # jobs tendran steps
+  terraform: #name of the job es terraform
+    name: "Apply terraform code changes"
+    runs-on: ubuntu-latest #github action proporciona como contenedores donde correr los steps. en este caso se hará sobre ubuntu
+    defaults:
+      run:
+        shell: bash 
+        working-directory: ./terraform
+    steps: #comandos que se ejecutarán
+      - name: checkout source code
+        uses: actions/checkout@v2 #predefined actions that are stored in github mkplace
+      - name : Setup terraform with Specified version on the runner
+        uses: hashicorp/setup-terraform@v2
+        #with:
+          #terraform_version: 1.6.3 #especificamos la version
+      - name: Terraform init
+        id: init
+        run: terraform init -backend-config="bucket=$BUCKET_TF_STATE"
+
+      - name: Terraform format
+        id: fmt
+        run: terraform fmt -check #si el format no es correcto. Fallara
+        
+      - name: Terraform validate
+        id: validate
+        run: terraform validate
+
+      - name: Terraform plan
+        id: plan
+        run: terraform plan -no-color -input=false -out planfile #todos los outputs se pondrán en el planfile. No es mandatory pero el profe se encontró durante la ejecucion de esto en github workflow.
+        continue-on-error: true
+
+      - name: Terraform plan status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1 #the shell gets killed
